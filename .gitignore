@@ -42,8 +42,9 @@ htmlcov/
 *.gguf
 models/
 
-# Workspace (user data)
-workspace/
+# Workspace generated files (keep input.txt for scenarios)
+workspace/report.md
+workspace/report_formal.md
 
 # OS
 .DS_Store
