@@ -2,13 +2,33 @@
 
 A command-line application that runs a local LLM with interactive chat and tool/function calling support.
 
+**Local Inference Only**: This application runs entirely on your machine. No external APIs are used.
+
+---
+
+## 🚀 Quickstart
+
+Run these commands to get started immediately:
+
+```bash
+# 1. Setup (creates .venv and installs dependencies)
+chmod +x setup.sh
+./setup.sh
+
+# 2. Activate
+source .venv/bin/activate
+
+# 3. Run (example with a HuggingFace model)
+localchat --model "google/gemma-3-4b-it-qat-q4_0-gguf" --workspace ./workspace
+```
+
 ---
 
 ## ✅ Requirements Checklist
 
 | # | Requirement | Status | Evidence |
 |---|-------------|--------|----------|
-| 1 | CLI App with required flags | ✅ | `--model`, `--repo-id`, `--workspace`, `--system`, `--temperature`, `--max-tokens` |
+| 1 | CLI App with required flags | ✅ | `--model` (path or repo-id), `--workspace`, `--system` |
 | 2 | Local Inference Only | ✅ | Uses `llama-cpp-python` for fully local inference |
 | 3 | Hardware Acceleration | ✅ | Auto-detects CUDA/Metal/CPU, reports backend at startup |
 | 4 | Interactive REPL | ✅ | Maintains conversation history, supports `quit`/`exit`/`clear` |
@@ -26,22 +46,23 @@ A command-line application that runs a local LLM with interactive chat and tool/
 
 ## Features
 
-- Fully local inference (no external APIs)
+- **Fully local inference** (no external APIs used)
 - Tool calling support (read_file, write_file)
 - Sandboxed file operations (path traversal protection)
-- CUDA/Metal/CPU backend auto-detection
+- **CUDA/Metal/CPU backend auto-detection**
 - Interactive REPL with session history
 - Generation statistics (tokens/sec, response time)
 
 ## Requirements
 
 - Python 3.10+
-- CUDA Toolkit 11.x or 12.x (for GPU acceleration)
-- ~4GB disk space for model
+- **Hardware Acceleration** (Recommended):
+    - **Apple Silicon (Metal)**: Works out of the box with default install.
+    - **NVIDIA GPU (CUDA)**: Requires CUDA Toolkit 11.x or 12.x.
 
 ## Installation
 
-### Quick Setup (Recommended)
+### Standard Setup
 
 ```bash
 git clone <repository-url>
@@ -50,64 +71,70 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-### Manual Setup
+### Hardware Acceleration Notes
 
+The `setup.sh` script installs the default `llama-cpp-python`. For optimal performance on specific hardware, you may need to reinstall with specific build flags:
+
+**Apple Silicon (Metal)**:
+Usually enabled by default. If issues arise:
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+```
+
+**NVIDIA GPU (Linear/Windows)**:
+```bash
 CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
-pip install -e .
-mkdir -p models workspace
 ```
 
-### Download Model
-
-1. Visit https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf
-2. Accept the license agreement
-3. Download:
-
-```bash
-pip install huggingface_hub
-huggingface-cli login
-huggingface-cli download google/gemma-3-4b-it-qat-q4_0-gguf gemma-3-4b-it-qat-q4_0.gguf --local-dir models
-```
+**CPU Only**:
+Default behavior. No extra steps needed.
 
 ## Usage
 
+Activate the environment first:
 ```bash
-source venv/bin/activate
-localchat --model models/gemma-3-4b-it-qat-q4_0.gguf --workspace ./workspace
+source .venv/bin/activate
 ```
 
-Or using HuggingFace repo ID (auto-downloads):
+### Run with a Model
 
+You can provide either a **local file path** or a **Hugging Face Repo ID** to the `--model` flag.
+
+**Option 1: Hugging Face Repo ID (Auto-download)**
 ```bash
-localchat --repo-id google/gemma-3-4b-it-qat-q4_0-gguf --filename gemma-3-4b-it-q4_0.gguf --workspace ./workspace
+# Defaults to looking for .gguf files in the repo
+localchat --model google/gemma-3-4b-it-qat-q4_0-gguf
+```
+*Note: You can specify a filename if needed with `--filename`, otherwise it attempts to find a suitable GGUF.*
+
+**Option 2: Local File Path**
+```bash
+localchat --model ./models/my-model.gguf
 ```
 
 ### CLI Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| --model | Path to GGUF model file | None |
-| --repo-id | HuggingFace repo ID for model | None |
-| --filename | Filename within HuggingFace repo | None |
-| --workspace | Sandbox directory for file tools | ./workspace |
-| --system | Path to system prompt file | None |
-| --temperature | Sampling temperature | 0.7 |
-| --max-tokens | Maximum tokens to generate | 2048 |
+| `--model` | Path to GGUF file OR Hugging Face Repo ID | Required |
+| `--filename` | Specific filename (if using Repo ID) | Auto-detected if omitted |
+| `--workspace` | Sandbox directory for file tools | `./workspace` |
+| `--system` | Path to system prompt file | `None` |
+| `--temperature` | Sampling temperature | `0.7` |
+| `--max-tokens` | Maximum tokens to generate | `2048` |
+
+_Legacy options `--repo-id` is supported for backward compatibility but `--model` is preferred._
 
 ### REPL Commands
 
-- quit/exit: End the session
-- clear: Clear conversation history
+- `quit` / `exit`: End the session
+- `clear`: Clear conversation history
 
-## Supported Tools
+## Tested On
 
-- read_file(path): Read file content from workspace
-- write_file(path, content): Write content to file in workspace
-
-Security: All file operations are sandboxed. Path traversal attempts are blocked.
+- **CPU**: Ubuntu 22.04 (Azure VM), Python 3.10
+- **CUDA**: NVIDIA A100 (Ubuntu 22.04), CUDA 12.x
+- **Metal**: macOS Sequoia (M2 Air)
 
 ---
 

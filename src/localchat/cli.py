@@ -19,19 +19,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        help="Path to GGUF model file",
+        help="Path to GGUF model file OR Hugging Face Repo ID",
     )
     
     parser.add_argument(
         "--repo-id",
         type=str,
-        help="Hugging Face Hub Repository ID (e.g. google/gemma-3-4b-it-qat-q4_0-gguf)",
+        help="[Legacy] Hugging Face Hub Repository ID",
     )
 
     parser.add_argument(
         "--filename",
         type=str,
-        help="Filename in the repository (required if --repo-id is used)",
+        help="Filename in the repository (required if --repo-id is used, optional if --model is used as Repo ID)",
     )
     
     parser.add_argument(
@@ -69,26 +69,35 @@ def main() -> int:
     """Main entry point."""
     args = parse_args()
     
-    # Validate arguments
-    if not args.model and not args.repo_id:
+    # Determine mode
+    model_path = None
+    repo_id = None
+    filename = args.filename
+
+    if args.repo_id:
+        if args.model:
+            print("Error: Cannot provide both --model and --repo-id", file=sys.stderr)
+            return 1
+        if not args.filename:
+            print("Error: --filename is required when using --repo-id", file=sys.stderr)
+            return 1
+        
+        repo_id = args.repo_id
+        # filename already set
+        
+    elif args.model:
+        # Check if it looks like a file path
+        p = Path(args.model)
+        if p.exists():
+            model_path = p
+        else:
+            # Assume it's a repo-id
+            repo_id = args.model
+            # filename remains as passed in args (optional)
+            
+    else:
         print("Error: Either --model or --repo-id must be provided", file=sys.stderr)
         return 1
-        
-    if args.model and args.repo_id:
-        print("Error: Cannot provide both --model and --repo-id", file=sys.stderr)
-        return 1
-
-    if args.repo_id and not args.filename:
-        print("Error: --filename is required when using --repo-id", file=sys.stderr)
-        return 1
-    
-    # Validate model path if provided
-    model_path = None
-    if args.model:
-        model_path = Path(args.model)
-        if not model_path.exists():
-            print(f"Error: Model file not found: {model_path}", file=sys.stderr)
-            return 1
     
     # Ensure workspace directory exists
     workspace = Path(args.workspace)
@@ -109,8 +118,8 @@ def main() -> int:
     try:
         model, runtime_info = load_model(
             model_path=model_path,
-            repo_id=args.repo_id,
-            filename=args.filename,
+            repo_id=repo_id,
+            filename=filename,
         )
         runtime_info.display()
     except Exception as e:
