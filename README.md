@@ -212,6 +212,8 @@ You are absolutely correct! My apologies. I was attempting to access a file outs
 
 ## Design Notes
 
+For a detailed explanation of the architectural decisions and technical tradeoffs, please refer to [DESIGN.md](DESIGN.md).
+
 ### Tool Call Representation
 
 Tool calls are represented using a markdown code block format:
