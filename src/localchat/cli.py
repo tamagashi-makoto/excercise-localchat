@@ -19,8 +19,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        required=True,
         help="Path to GGUF model file",
+    )
+    
+    parser.add_argument(
+        "--repo-id",
+        type=str,
+        help="Hugging Face Hub Repository ID (e.g. google/gemma-3-4b-it-qat-q4_0-gguf)",
+    )
+
+    parser.add_argument(
+        "--filename",
+        type=str,
+        help="Filename in the repository (required if --repo-id is used)",
     )
     
     parser.add_argument(
@@ -58,11 +69,26 @@ def main() -> int:
     """Main entry point."""
     args = parse_args()
     
-    # Validate model path
-    model_path = Path(args.model)
-    if not model_path.exists():
-        print(f"Error: Model file not found: {model_path}", file=sys.stderr)
+    # Validate arguments
+    if not args.model and not args.repo_id:
+        print("Error: Either --model or --repo-id must be provided", file=sys.stderr)
         return 1
+        
+    if args.model and args.repo_id:
+        print("Error: Cannot provide both --model and --repo-id", file=sys.stderr)
+        return 1
+
+    if args.repo_id and not args.filename:
+        print("Error: --filename is required when using --repo-id", file=sys.stderr)
+        return 1
+    
+    # Validate model path if provided
+    model_path = None
+    if args.model:
+        model_path = Path(args.model)
+        if not model_path.exists():
+            print(f"Error: Model file not found: {model_path}", file=sys.stderr)
+            return 1
     
     # Ensure workspace directory exists
     workspace = Path(args.workspace)
@@ -81,7 +107,11 @@ def main() -> int:
     # Load model with backend detection
     print("Loading model...")
     try:
-        model, runtime_info = load_model(model_path)
+        model, runtime_info = load_model(
+            model_path=model_path,
+            repo_id=args.repo_id,
+            filename=args.filename,
+        )
         runtime_info.display()
     except Exception as e:
         print(f"Error loading model: {e}", file=sys.stderr)
