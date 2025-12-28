@@ -2,6 +2,9 @@
 
 import argparse
 import sys
+import json
+import os
+import datetime
 from pathlib import Path
 
 from localchat.model import load_model
@@ -60,6 +63,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=2048,
         help="Maximum tokens to generate (default: 2048)",
+    )
+
+    parser.add_argument(
+        "--session",
+        type=str,
+        default=None,
+        help="Path to session file for history persistence",
     )
     
     return parser.parse_args()
@@ -137,6 +147,7 @@ def main() -> int:
         system_prompt=system_prompt,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        session_file=Path(args.session) if args.session else None,
     )
     
     return 0

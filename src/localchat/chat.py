@@ -3,10 +3,27 @@
 import json
 import re
 import time
+import os
+import sys
+import datetime
+from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional, Protocol, runtime_checkable
 
-from llama_cpp import Llama
+# from llama_cpp import Llama  # Removed to avoid runtime dependency
+
+@runtime_checkable
+class LlamaModelProtocol(Protocol):
+    """Protocol for Llama model to avoid runtime dependency on llama_cpp."""
+    def create_chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        temperature: float = 0.2,
+        max_tokens: int = 256,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any] | Any:
+        ...
 
 from localchat.tools import ToolExecutor, TOOL_DEFINITIONS
 
@@ -17,6 +34,19 @@ class ToolCall:
     name: str
     arguments: dict
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "arguments": self.arguments
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
+        return cls(
+            name=data["name"],
+            arguments=data["arguments"]
+        )
+
 
 @dataclass
 class Message:
@@ -25,6 +55,30 @@ class Message:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: Optional[str] = None  # For tool result messages
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {
+            "role": self.role,
+            "content": self.content,
+        }
+        if self.tool_calls:
+            data["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        if self.tool_call_id:
+            data["tool_call_id"] = self.tool_call_id
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
+        tool_calls = []
+        if "tool_calls" in data:
+            tool_calls = [ToolCall.from_dict(tc) for tc in data["tool_calls"]]
+        
+        return cls(
+            role=data["role"],
+            content=data["content"] or "",
+            tool_calls=tool_calls,
+            tool_call_id=data.get("tool_call_id")
+        )
 
 
 @dataclass 
@@ -56,7 +110,7 @@ class ChatEngine:
     
     def __init__(
         self,
-        model: Llama,
+        model: LlamaModelProtocol,
         tool_executor: ToolExecutor,
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
@@ -66,7 +120,7 @@ class ChatEngine:
         Initialize the chat engine.
         
         Args:
-            model: The loaded Llama model
+            model: The loaded Llama model (conforming to LlamaModelProtocol)
             tool_executor: Tool executor for handling tool calls
             system_prompt: Optional system prompt
             temperature: Sampling temperature
@@ -165,32 +219,132 @@ Only use tools when necessary to complete the user's request."""
         return tool_calls, clean_text
     
     def _generate_response(self) -> tuple[str, GenerationStats]:
-        """Generate a response from the model."""
+        """Generate a response from the model, optionally streaming it."""
         messages = self._build_messages_for_model()
         
         start_time = time.time()
         
-        response = self.model.create_chat_completion(
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
+        full_text = ""
+        completion_tokens = 0
+        prompt_tokens = 0
+        total_tokens = 0
         
+        # Buffer for tool call detection
+        buffer = ""
+        in_tool_call_block = False
+        
+        try:
+            # Try to stream first
+            response_iter = self.model.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stream=True,
+            )
+            
+            # If the model doesn't support streaming (or returns dict immediately), 
+            # it might not return an iterator. 
+            # However, Llama.cpp usually returns a generator if stream=True.
+            # If it creates a single dict (not iterable of chunks), we handle it.
+            if isinstance(response_iter, dict):
+                 # Fallback for non-streaming response that ignored stream=True
+                 response = response_iter
+                 full_text = response["choices"][0]["message"]["content"] or ""
+                 usage = response.get("usage", {})
+                 print(full_text, end="", flush=True) # Emulate stream
+                 
+                 return full_text, GenerationStats(
+                    total_tokens=usage.get("total_tokens", 0),
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    duration_seconds=time.time() - start_time,
+                 )
+
+            marker = "```tool_call"
+            
+            for chunk in response_iter:
+                if not isinstance(chunk, dict):
+                    continue
+                    
+                delta = chunk["choices"][0].get("delta", {})
+                content = delta.get("content", "")
+                
+                if content:
+                    completion_tokens += 1
+                    full_text += content
+                    buffer += content
+                    
+                    if in_tool_call_block:
+                         # We are in tool block, suppress output
+                         # We could check for end of block here if we wanted to resume printing
+                         # But per design, we suppress everything after tool call starts
+                         pass
+                    else:
+                        # Check if we found the marker
+                        if marker in buffer:
+                            in_tool_call_block = True
+                            # Print everything before the marker
+                            split_index = buffer.find(marker)
+                            to_print = buffer[:split_index]
+                            if to_print:
+                                print(to_print, end="", flush=True)
+                            buffer = buffer[split_index:] # Keep rest in buffer (suppressed)
+                        else:
+                            # Check for partial marker at the end
+                            possible_match_len = 0
+                            # Check suffixes of buffer
+                            # Optimization: only check suffixes up to len(marker) - 1
+                            # and start checking from longest potential match
+                            max_check = min(len(buffer), len(marker) - 1)
+                            for i in range(max_check, 0, -1):
+                                suffix = buffer[-i:]
+                                if marker.startswith(suffix):
+                                    possible_match_len = i
+                                    break
+                            
+                            if possible_match_len > 0:
+                                # Printable part is everything except the suffix
+                                to_print = buffer[:-possible_match_len]
+                                if to_print:
+                                    print(to_print, end="", flush=True)
+                                buffer = buffer[-possible_match_len:] # Keep the partial match for next iteration
+                            else:
+                                # No partial match, safe to print all
+                                print(buffer, end="", flush=True)
+                                buffer = ""
+        
+        except TypeError:
+            # Fallback if unexpected arguments or behavior
+            response = self.model.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            full_text = response["choices"][0]["message"]["content"]
+            usage = response.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+            print(full_text, end="", flush=True) # Print all at once
+
         duration = time.time() - start_time
         
-        # Extract response text
-        response_text = response["choices"][0]["message"]["content"]
-        
-        # Extract usage stats
-        usage = response.get("usage", {})
+        # If we didn't get usage from a direct dict API, estimate it
+        if total_tokens == 0:
+             # Very rough estimate
+             # We don't have prompt tokens easily available from stream chunks 
+             # (llama-cpp-python puts usage in the *last* chunk usually, but not guaranteed)
+             # Let's try to trust the stats return if possible, or just use length.
+             completion_tokens = len(full_text) // 4 
+             
         stats = GenerationStats(
-            total_tokens=usage.get("total_tokens", 0),
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             duration_seconds=duration,
         )
         
-        return response_text, stats
+        return full_text, stats
     
     def chat(self, user_input: str) -> tuple[str, GenerationStats]:
         """
@@ -274,13 +428,22 @@ Only use tools when necessary to complete the user's request."""
         """Clear the conversation history."""
         self.history.clear()
 
+    def get_history_as_dicts(self) -> list[dict[str, Any]]:
+        """Return history as a list of dictionaries."""
+        return [msg.to_dict() for msg in self.history]
+
+    def load_history_from_dicts(self, history_data: list[dict[str, Any]]) -> None:
+        """Load history from a list of dictionaries."""
+        self.history = [Message.from_dict(msg_data) for msg_data in history_data]
+
 
 def run_repl(
-    model: Llama,
+    model: LlamaModelProtocol,
     tool_executor: ToolExecutor,
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    session_file: Optional[Path] = None,
 ) -> None:
     """
     Run the interactive REPL loop.
@@ -291,6 +454,7 @@ def run_repl(
         system_prompt: Optional system prompt
         temperature: Sampling temperature
         max_tokens: Maximum tokens to generate
+        session_file: Optional path to session file for persistence
     """
     engine = ChatEngine(
         model=model,
@@ -299,6 +463,20 @@ def run_repl(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    
+    # Load session if provided
+    if session_file and session_file.exists():
+        try:
+            print(f"Loading session from {session_file}...")
+            content = session_file.read_text(encoding="utf-8")
+            data = json.loads(content)
+            if "history" in data:
+                engine.load_history_from_dicts(data["history"])
+                print(f"Restored {len(engine.history)} messages.")
+            else:
+                print("Warning: Session file missing 'history' key. Starting new session.")
+        except Exception as e:
+            print(f"Warning: Failed to load session: {e}. Starting new session.")
     
     print("\nLocalChat Ready! Type 'quit' or 'exit' to end the session.")
     print("Type 'clear' to clear conversation history.")
@@ -326,11 +504,26 @@ def run_repl(
             response, stats = engine.chat(user_input)
             
             # Print response (if not already printed during tool calls)
-            if response:
+            if response and False: # Disabled because chat() now streams to stdout
                 print(response)
             
             # Print stats
             print(f"\n  [{stats.completion_tokens} tokens, {stats.tokens_per_second:.1f} tok/s, {stats.duration_seconds:.2f}s]")
+            
+            # Save session if configured
+            if session_file:
+                try:
+                    data = {
+                        "version": 1,
+                        "created_at": datetime.datetime.now().isoformat(),
+                        "history": engine.get_history_as_dicts()
+                    }
+                    # Atomic write
+                    temp_file = session_file.with_suffix(session_file.suffix + ".tmp")
+                    temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                    os.replace(temp_file, session_file)
+                except Exception as e:
+                    print(f"\nWarning: Failed to save session: {e}", file=sys.stderr)
             
         except KeyboardInterrupt:
             print("\n\nInterrupted. Goodbye!")
