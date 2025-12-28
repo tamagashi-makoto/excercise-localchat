@@ -149,6 +149,7 @@ Assistant: ...
   ...
   TOOL CALL: write_file {"path": "report.md", "content": "...5 bullets..."}
   TOOL RESULT: Successfully wrote ... characters to report.md
+  ...
   [426 tokens, 116.6 tok/s, 3.65s]
 ```
 
@@ -170,6 +171,7 @@ Assistant: ...
   ...
   TOOL CALL: write_file {"path": "report_formal.md", "content": "...formal summary..."}
   TOOL RESULT: Successfully wrote ... characters to report_formal.md
+  ...
   [420 tokens, 144.9 tok/s, 2.90s]
 ```
 
@@ -188,6 +190,7 @@ You: Read ../secrets.txt
 Assistant:
   TOOL CALL: read_file {"path": "../secrets.txt"}
   TOOL RESULT: Error: Access denied: '../secrets.txt' is outside the workspace directory. Only files within '.../workspace' can be accessed.
+  ...
   [80 tokens, 123.9 tok/s, 0.65s]
 ```
 
