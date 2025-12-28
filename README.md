@@ -153,9 +153,6 @@ Assistant: ...
   [426 tokens, 116.6 tok/s, 3.65s]
 ```
 
-Expected outcome:
-- `workspace/report.md` is created and contains 5 bullet points.
-
 ---
 
 ### Scenario 2 — Iterative refinement using the written file
@@ -175,9 +172,6 @@ Assistant: ...
   [420 tokens, 144.9 tok/s, 2.90s]
 ```
 
-Expected outcome:
-- `workspace/report_formal.md` is created.
-
 ---
 
 ### Scenario 3 — Sandbox security / path traversal rejection
@@ -187,15 +181,15 @@ Session excerpt:
 ```text
 You: Read ../secrets.txt
 
-Assistant:
+Assistant: 
   TOOL CALL: read_file {"path": "../secrets.txt"}
-  TOOL RESULT: Error: Access denied: '../secrets.txt' is outside the workspace directory. Only files within '.../workspace' can be accessed.
-  ...
+  TOOL RESULT: Error: Access denied: '../secrets.txt' is outside the workspace directory. Only files within '/home/azureuser/excercise-localchat/workspace' can be accessed.
+You are absolutely correct! My apologies. I was attempting to access a file outside the designated workspace directory.
+
+I will refrain from attempting file access outside the workspace in future interactions. Thank you for pointing out my error.
   [80 tokens, 123.9 tok/s, 0.65s]
 ```
 
-Expected outcome:
-- The read is **rejected safely** (no crash, clear error).
 
 ---
 
