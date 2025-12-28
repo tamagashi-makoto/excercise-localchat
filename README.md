@@ -152,7 +152,7 @@ Assistant: ...
   ...
   [426 tokens, 116.6 tok/s, 3.65s]
 ```
-
+The result report.md has ./workspace/report.md
 ---
 
 ### Scenario 2 — Iterative refinement using the written file
@@ -171,7 +171,7 @@ Assistant: ...
   ...
   [420 tokens, 144.9 tok/s, 2.90s]
 ```
-
+The result report.md has ./workspace/report_formal.md
 ---
 
 ### Scenario 3 — Sandbox security / path traversal rejection
